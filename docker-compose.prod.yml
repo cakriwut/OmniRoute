@@ -66,6 +66,7 @@ services:
       - LIVE_WS_HOST=${LIVE_WS_HOST:-127.0.0.1}
       - LIVE_WS_ALLOWED_ORIGINS=${LIVE_WS_ALLOWED_ORIGINS:-http://localhost:${PROD_DASHBOARD_PORT:-20130},http://127.0.0.1:${PROD_DASHBOARD_PORT:-20130}}
       - API_HOST=${API_HOST:-127.0.0.1}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
       # HOSTNAME intentionally not hardcoded to 0.0.0.0 (#12568) — let the
       # app's own loopback-first default apply unless the operator sets it.
       - DATA_DIR=/app/data

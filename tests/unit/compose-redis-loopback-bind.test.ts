@@ -30,6 +30,18 @@ test("docker-compose publishes Redis on loopback by default", () => {
   );
 });
 
+test("production snapshot connects OmniRoute to its Redis sidecar by default", () => {
+  const compose = readCompose("docker-compose.prod.yml");
+  assert.match(compose, /REDIS_URL=\$\{REDIS_URL:-redis:\/\/redis:6379\}/);
+});
+
+test("host CLI profile connects OmniRoute to its Redis sidecar by default", () => {
+  const compose = readCompose("docker-compose.yml");
+  const hostProfile = compose.match(/omniroute-host:[\s\S]*?(?=\n  [a-z][\w-]*:|\nnetworks:)/)?.[0];
+  assert.ok(hostProfile, "omniroute-host service must be defined");
+  assert.match(hostProfile, /REDIS_URL=\$\{REDIS_URL:-redis:\/\/redis:6379\}/);
+});
+
 test("no compose file publishes a port on 0.0.0.0 implicitly for Redis", () => {
   for (const file of ["docker-compose.yml", "docker-compose.prod.yml"]) {
     const compose = readCompose(file);
