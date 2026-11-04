@@ -1,7 +1,7 @@
 ---
 title: "🐳 Docker Guide — OmniRoute"
-version: 3.8.51
-lastUpdated: 2026-10-16
+version: 3.8.53
+lastUpdated: 2026-11-03
 ---
 
 # 🐳 Docker Guide — OmniRoute
@@ -14,9 +14,10 @@ lastUpdated: 2026-10-16
 - [With Environment File](#with-environment-file)
 - [Docker Compose](#docker-compose)
 - [Available Profiles](#available-profiles)
+- [Which Compose file should I use?](#which-compose-file-should-i-use)
 - [Configuring host CLI tools when OmniRoute runs in Docker](#configuring-host-cli-tools-when-omniroute-runs-in-docker)
 - [Redis Sidecar](#redis-sidecar)
-- [Production Compose](#production-compose)
+- [Production Snapshot Compose](#production-snapshot-compose)
 - [Dockerfile Stages](#dockerfile-stages)
 - [Critical Environment Variables](#critical-environment-variables)
 - [Docker Compose with Caddy (HTTPS)](#docker-compose-with-caddy-https-auto-tls)
@@ -86,15 +87,63 @@ docker compose --profile cli --profile cliproxyapi up -d
 
 OmniRoute ships Compose profiles for the main deployment shapes. Pick the one that matches your environment.
 
-| Profile          | Service          | When to use                                                                                                                        | Command                                      |
-| ---------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
-| `base` (default) | `omniroute-base` | Headless server / minimal runtime, no provider CLIs bundled                                                                        | `docker compose --profile base up -d`        |
-| `cli`            | `omniroute-cli`  | Agentic workflows that call `omniroute providers/setup/doctor` and bundled CLIs (Codex, Claude Code, Droid, OpenClaw)              | `docker compose --profile cli up -d`         |
-| `host`           | `omniroute-host` | Linux hosts that want `network_mode`-like access to host CLIs by mounting `~/.local/bin`, `~/.codex`, `~/.claude`, etc. read-only  | `docker compose --profile host up -d`        |
-| `cliproxyapi`    | `cliproxyapi`    | Run the [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) sidecar on port `8317` for upstream CLI proxying               | `docker compose --profile cliproxyapi up -d` |
-| `web`            | `omniroute-web`  | Web-session providers that need a browser: `gemini-web`, `claude-web`, `claude-turnstile` (builds `runner-web`, Chromium included) | `docker compose --profile web up -d`         |
+| Profile            | Service            | When to use                                                                                                                        | Command                                                          |
+| ------------------ | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `base` (default)   | `omniroute-base`   | Headless server / minimal runtime, no provider CLIs bundled                                                                        | `docker compose --profile base up -d`                            |
+| `cli`              | `omniroute-cli`    | Agentic workflows that call `omniroute providers/setup/doctor` and bundled CLIs (Codex, Claude Code, Droid, OpenClaw)              | `docker compose --profile cli up -d`                             |
+| `host`             | `omniroute-host`   | Linux hosts that want `network_mode`-like access to host CLIs by mounting `~/.local/bin`, `~/.codex`, `~/.claude`, etc. read-only  | `docker compose --profile host up -d`                            |
+| `cliproxyapi`      | `cliproxyapi`      | Run the [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) sidecar on port `8317` for upstream CLI proxying               | `docker compose --profile cliproxyapi up -d`                     |
+| `web`              | `omniroute-web`    | Web-session providers that need a browser: `gemini-web`, `claude-web`, `claude-turnstile` (builds `runner-web`, Chromium included) | `docker compose --profile web up -d`                             |
+| `memory`           | `qdrant`           | Optional Qdrant sidecar for semantic memory when explicitly enabled; SQLite remains the default store                              | `docker compose --profile base --profile memory up -d`           |
+| `bifrost`          | `bifrost`          | Optional Tier-1 LLM router sidecar; delegation also requires `BIFROST_ENABLED=true`                                                | `docker compose --profile base --profile bifrost up -d`          |
+| `codex-app-server` | `codex-app-server` | Optional Codex CLI app-server, internal WebSocket with a capability token; not host-published                                      | `docker compose --profile base --profile codex-app-server up -d` |
 
 > Multiple profiles can be combined: `docker compose --profile cli --profile cliproxyapi up -d`.
+
+## Which Compose file should I use?
+
+The repository has several Compose files for different jobs; they are not
+interchangeable deployment variants:
+
+| File                                                                       | Intended use                                                         | What it starts / notable configuration                                                                                                                                                                                                                                                                                                                 |
+| -------------------------------------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [`docker-compose.yml`](../../docker-compose.yml)                           | Local development and configurable installs built from this checkout | Redis is always defined; choose an app profile (`base`, `cli`, `host`, or `web`). Optional profiles add CLIProxyAPI, Qdrant (`memory`), Bifrost, or the Codex app-server. App services are profile-gated, so a plain `docker compose up -d` starts Redis but no OmniRoute app. App startup is not gated on Redis health.                               |
+| [`docker-compose.selfhost.yml`](../../docker-compose.selfhost.yml)         | Quick single-user self-host from the published image                 | One app plus Redis, no profiles or build. Waits for Redis health, binds app ports to loopback by default, does not publish Redis, and bind-mounts `./data`. See the [Self-Host Guide](../getting-started/SELF_HOST_GUIDE.md).                                                                                                                          |
+| [`docker-compose.prod.yml`](../../docker-compose.prod.yml)                 | A local production-shaped snapshot running beside development        | Builds the `runner-cli` app image, waits for Redis health, and runs its own ports/volumes plus Redis and the ChatGPT Web Codex browser sidecar. Despite the filename, it is not the hardened VPS deployment bundle.                                                                                                                                    |
+| [`contrib/vps/compose.yaml`](../../contrib/vps/compose.yaml)               | Headless Linux VPS deployment                                        | Uses a required versioned image tag or digest, requires production secrets, waits for Redis health, binds the app to loopback, and applies resource/process/security limits and bounded logs. Redis is private and uses RDB plus AOF persistence.                                                                                                      |
+| [`docker-compose.ollama-local.yml`](../../docker-compose.ollama-local.yml) | Run OmniRoute in Docker while Ollama runs natively on the Linux host | A single app container, with `host.docker.internal` mapped to the host gateway. It has no Redis service and does not configure `REDIS_URL`, so Redis-backed features use their documented fallback/default behavior. The app port defaults to all host interfaces; set `APP_BIND_HOST=127.0.0.1` unless you have deliberately secured external access. |
+| [`docker/devin-bridge/compose.yml`](../../docker/devin-bridge/compose.yml) | Isolated offline/live Devin and Claude integration tests             | Test-only profiles and egress-guard networks, isolated data/config volumes, and mocked or guarded agent traffic. It is not a general deployment compose and has no Redis service.                                                                                                                                                                      |
+
+Use the self-host file for the one-command published-image setup, the root
+profiled file when you need its build flavors or optional sidecars, and the VPS
+bundle for unattended headless production. Use the `prod` snapshot only for
+its documented local parallel-instance workflow.
+
+## What Redis does in these Compose files
+
+Redis is a backing service, not OmniRoute's primary database. The application
+database and normal persistent app data remain in the mounted `/app/data`
+directory/volume. Where a Compose file sets
+`REDIS_URL=redis://redis:6379`, OmniRoute can use Redis for atomic rate-limit
+counters shared by app instances and for the warmup circuit-breaker store.
+Without a configured Redis URL, rate limiting uses a process-local in-memory
+fallback, and warmup circuit-breaker state uses SQLite instead.
+For example, two app instances using the same API key share the Redis rate
+counter; with the in-memory fallback, each process tracks its own counter.
+
+Other Redis-backed features are separate opt-ins: semantic-cache Redis storage
+requires the semantic cache to be enabled and configured with the Redis backend;
+session-affinity sharing requires `OMNIROUTE_SESSION_AFFINITY_STORE=redis`;
+quota sharing defaults to SQLite and uses `QUOTA_STORE_DRIVER=redis` plus its
+own `QUOTA_STORE_REDIS_URL`. Merely starting the Redis container does not enable
+these optional stores.
+
+The main, self-host, `prod`, and VPS Compose files all define an internal Redis
+service and point OmniRoute at `redis:6379`. The root profile compose also offers
+a loopback-only host port for local tools; the other three do not publish Redis
+to the host. They all use Redis 8.6.5 Alpine with RDB snapshots (`--save 60 1`);
+the VPS bundle additionally enables AOF. The Ollama-local and Devin bridge files
+do not define Redis.
 
 ## Configuring host CLI tools when OmniRoute runs in Docker
 
@@ -180,11 +229,11 @@ with a warning that it will not survive the container.
 
 ## Redis Sidecar
 
-OmniRoute relies on Redis to back the distributed rate limiter and shared cache. The `redis` service is **always defined** in `docker-compose.yml` (it has no profile gate) and starts alongside any other profile.
+The `redis` service is **always defined** in `docker-compose.yml` (it has no profile gate) and starts alongside any selected profile. It backs the Redis-configured rate limiter and warmup circuit-breaker store; Redis is optional at runtime and the documented fallbacks apply when unavailable.
 
 | Detail               | Value                                       |
 | -------------------- | ------------------------------------------- |
-| Image                | `redis:7-alpine`                            |
+| Image                | `docker.io/library/redis:8.6.5-alpine`      |
 | Container name       | `omniroute-redis`                           |
 | Internal port        | `6379`                                      |
 | Host port (override) | `REDIS_PORT` (defaults to `6379`)           |
@@ -210,9 +259,11 @@ Related environment variables:
 docker compose up -d --scale redis=0
 ```
 
-## Production Compose
+## Production Snapshot Compose
 
-For an isolated production snapshot running alongside dev, use `docker-compose.prod.yml`.
+For an isolated, production-shaped snapshot running alongside dev, use
+`docker-compose.prod.yml`. For a headless, hardened VPS deployment, use
+[`contrib/vps/compose.yaml`](../../contrib/vps/compose.yaml) instead.
 
 | Detail                 | Value                                                                              |
 | ---------------------- | ---------------------------------------------------------------------------------- |
@@ -220,7 +271,7 @@ For an isolated production snapshot running alongside dev, use `docker-compose.p
 | Default dashboard port | `PROD_DASHBOARD_PORT=20130` (mapped to internal `${DASHBOARD_PORT:-20128}`)        |
 | Default API port       | `PROD_API_PORT=20131`                                                              |
 | Image                  | `omniroute:prod` (built from `runner-cli` target)                                  |
-| Redis container        | `omniroute-redis-prod` (`redis:8.6.2`, dedicated `redis-prod-data` volume)         |
+| Redis container        | `omniroute-redis-prod` (`redis:8.6.5-alpine`, dedicated `redis-prod-data` volume)  |
 | Data volume            | `omniroute-prod-data` (named, persisted across rebuilds)                           |
 | Healthchecks           | `node healthcheck.mjs` + `redis-cli ping`, with `depends_on` gated on Redis health |
 
@@ -237,7 +288,9 @@ docker compose -f docker-compose.prod.yml logs -f
 docker compose -f docker-compose.prod.yml down
 ```
 
-The prod stack runs in parallel with the dev compose (different container names, ports, and volumes), so you can keep iterating locally while production stays up.
+The prod snapshot stack runs in parallel with the dev compose (different
+container names, ports, and volumes), so you can keep iterating locally while
+the snapshot stays up. It is not a hardened public-production template.
 
 ## Dockerfile Stages
 
