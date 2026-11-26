@@ -165,6 +165,7 @@ import { resolveApiKeyForbiddenFallback } from "./accountFallback/nonRetryableUp
 import * as exactModelLock from "./accountFallback/exactModelLock.ts";
 import { isCreditsExhaustedWithSharedWallet } from "./accountFallback/sharedWalletCredits.ts";
 import { CREDITS_EXHAUSTED_SIGNALS } from "./accountFallback/creditExhaustionSignals.ts";
+import { classifyCompatibleAccountQuota } from "./accountFallback/compatibleAccountQuota.ts";
 import {
   isCreditsExhaustedForStatus,
   quotaTextSignalCountsForStatus,
@@ -1933,6 +1934,7 @@ export function checkFallbackError(
   reason?: string;
   permanent?: boolean;
   creditsExhausted?: boolean;
+  compatibleAccountQuota?: true;
   dailyQuotaExhausted?: boolean;
   /** #13609: bare Mistral 401 softened to a cooldown (MISTRAL_AMBIGUOUS_401_SOFT_LOCKOUT). */
   ambiguousAuth?: boolean;
@@ -2325,6 +2327,17 @@ export function checkFallbackError(
       if (isTpmExhausted(_model)) {
         return buildRetryableFallback(RateLimitReason.RATE_LIMIT_EXCEEDED);
       }
+    }
+
+    const compatibleQuota = classifyCompatibleAccountQuota(status, provider, errorStr);
+    if (compatibleQuota) {
+      return {
+        shouldFallback: true,
+        reason: RateLimitReason.QUOTA_EXHAUSTED,
+        skipProviderBreaker: true,
+        compatibleAccountQuota: true,
+        ...compatibleQuota,
+      };
     }
 
     // T10 (sub2api #1169) + #8247: credits/quota exhausted; per-model-quota providers stay model-scoped

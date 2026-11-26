@@ -49,7 +49,7 @@ for (const provider of ["anthropic-compatible-abc123", "anthropic"]) {
   test(`${provider}: 400 specified API usage limit is account-level exhaustion`, () => {
     const r = checkFallbackError(400, USAGE_LIMIT_TEXT, 0, "claude-sonnet-5-5", provider);
     assert.equal(r.shouldFallback, true);
-    assert.equal(r.creditsExhausted, true, "connection must park as credits_exhausted");
+    assert.equal(r.creditsExhausted, provider === "anthropic");
     assert.equal(
       classifyProviderError(400, ANTHROPIC_USAGE_LIMIT_BODY, provider),
       PROVIDER_ERROR_TYPES.QUOTA_EXHAUSTED
@@ -85,21 +85,15 @@ test("#20968 a 400 that merely quotes the phrase mid-text stays non-credit", () 
   assert.notEqual(usageLimitEchoResult.creditsExhausted, true);
 });
 
-test("#20968 a non-Anthropic provider with the Anthropic body on 400 is unchanged", () => {
-  const r = checkFallbackError(400, TEXT, 0, "gpt-x", "openai-compatible-zzz");
-  // openai-compatible-* keeps its own message-only 400 credit form (model-scoped carve-out)
-  assert.notEqual(r.creditsExhausted, true);
-
-  const usageLimitResult = checkFallbackError(
-    400,
-    USAGE_LIMIT_TEXT,
-    0,
-    "gpt-x",
-    "openai-compatible-zzz"
-  );
-  assert.notEqual(usageLimitResult.creditsExhausted, true);
-  assert.notEqual(
-    classifyProviderError(400, ANTHROPIC_USAGE_LIMIT_BODY, "openai-compatible-zzz"),
+test("custom OpenAI nodes also recognize account-wide billing responses", () => {
+  const provider = "openai-compatible-zzz";
+  const exhausted = checkFallbackError(400, TEXT, 0, "gpt-x", provider);
+  assert.equal(exhausted.creditsExhausted, true);
+  const limited = checkFallbackError(400, USAGE_LIMIT_TEXT, 0, "gpt-x", provider);
+  assert.equal(limited.creditsExhausted, false);
+  assert.ok(limited.cooldownMs > 0);
+  assert.equal(
+    classifyProviderError(400, ANTHROPIC_USAGE_LIMIT_BODY, provider),
     PROVIDER_ERROR_TYPES.QUOTA_EXHAUSTED
   );
 });

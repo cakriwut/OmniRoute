@@ -15,6 +15,7 @@ import { finitePercentUsed, remainingPercentFromQuotaWindows } from "../antigrav
 import { errorResponse } from "../../utils/error.ts";
 import { isContentPolicyRefusal } from "../../utils/contentPolicyError.ts";
 import { parseModel } from "../model.ts";
+import { classifyCompatibleAccountQuota } from "../accountFallback/compatibleAccountQuota.ts";
 import { isSelfInflictedUpstreamTimeout } from "../../handlers/chatCore/cooldownClassification.ts";
 import {
   isLocalStreamLifecycleError,
@@ -599,6 +600,7 @@ export function shouldSkipConnDisable(
       (isInputBoundRequestFailure({ code: result.errorCode, type: result.errorType }) ||
         result.errorCode === "context_length_exceeded" ||
         result.errorType === "context_length_exceeded"));
+  const isAccountQuota = classifyCompatibleAccountQuota(result.status, provider, errorText) !== null;
 
   return (
     // Local turn deduplication is not an account or provider failure.
@@ -620,12 +622,14 @@ export function shouldSkipConnDisable(
     // Cursor's typed model-unavailable 404 is not a malformed request. Reuse
     // the same model attribution predicate as failure persistence; ordinary
     // invalid_request_error (including 400) remains request-scoped.
-    (isRequestScopedUpstreamFailure({ code: result.errorCode, type: result.errorType }) &&
+    // A compatible gateway can wrap a confirmed billing failure as invalid_request_error.
+    (!isAccountQuota &&
+      isRequestScopedUpstreamFailure({ code: result.errorCode, type: result.errorType }) &&
       !(provider === "cursor" && isModelNotFound404(result.status, errorText))) ||
     isSelfInflictedUpstreamTimeout(result.status, result.errorType, provider) ||
     // #14948: a ChatGPT Web browser-bridge failure is local, not an account failure.
     isChatGptWebBridgeFailure(provider, result.error) ||
-    isReqScoped400
+    (!isAccountQuota && isReqScoped400)
   );
 }
 

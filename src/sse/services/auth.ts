@@ -2937,6 +2937,27 @@ export async function markAccountUnavailable(
       return { shouldFallback: true, cooldownMs: 0 };
     }
 
+    if (fallbackResult.compatibleAccountQuota) {
+      const terminal = fallbackResult.creditsExhausted === true;
+      const cooldownMs = coolingDisabled ? 0 : fallbackResult.cooldownMs;
+      await updateProviderConnection(connectionId, {
+        lastErrorType: RateLimitReason.QUOTA_EXHAUSTED,
+        lastError: sanitizeErrorMessage(errorText) || "Account quota exhausted",
+        lastErrorAt: new Date().toISOString(),
+        errorCode: status,
+        ...(terminal
+          ? { testStatus: "credits_exhausted", rateLimitedUntil: null }
+          : cooldownMs > 0
+            ? { testStatus: "unavailable", rateLimitedUntil: getUnavailableUntil(cooldownMs) }
+            : {}),
+      });
+      log.info(
+        "AUTH",
+        `Connection ${connectionId.slice(0, 8)} quota exhausted (${provider}, HTTP ${status}) — ${terminal ? "credits_exhausted" : `cooldown ${Math.ceil(cooldownMs / 1000)}s`}`
+      );
+      return { shouldFallback: !options.suppressFallback, cooldownMs };
+    }
+
     // Native M365 mixes model licences/budgets and per-account throttling. Honor
     // the classified scope before generic auth/ban and passthrough quota handling.
     if (provider === "copilot-m365-web" && fallbackResult.ruleScope) {

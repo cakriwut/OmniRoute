@@ -7,6 +7,7 @@ import {
 } from "./accountFallback.ts";
 import { isSubscriptionQuotaForStatus } from "./quotaTextCooldowns.ts";
 import { isCreditsExhaustedForStatus } from "./accountFallback/creditsExhaustedForStatus.ts";
+import { classifyCompatibleAccountQuota } from "./accountFallback/compatibleAccountQuota.ts";
 import { isProviderSafetyRefusalBody } from "../utils/providerSafety.ts";
 import { isModelScopedAccessDenial } from "./accountFallback/modelScopedAccessDenial.ts";
 import { getProviderCategory, getRegistryEntry } from "../config/providerRegistry.ts";
@@ -466,6 +467,10 @@ export function classifyProviderError(
     isProviderSafetyRefusalBody(statusCode, responseBody)
   ) {
     return PROVIDER_ERROR_TYPES.PROVIDER_SAFETY_REFUSAL;
+  }
+
+  if (classifyCompatibleAccountQuota(statusCode, provider, bodyStr)) {
+    return PROVIDER_ERROR_TYPES.QUOTA_EXHAUSTED;
   }
 
   if (

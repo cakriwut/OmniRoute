@@ -126,6 +126,7 @@ export type ComboExhaustionSets = {
 export type ApplyComboTargetExhaustionOptions = {
   result: { status: number; headers?: Headers | null };
   fallbackResult: Parameters<typeof isProviderExhaustedReason>[0] & {
+    compatibleAccountQuota?: true;
     /** #10334 — agentrouter + opencode family; see isAgentrouterConnectionQuotaScope
      * (src/sse/services/auth.ts). Populated only for providers in
      * HONORS_RULE_LOCK_SCOPE_PROVIDERS (agentrouter + opencode family). */
@@ -304,6 +305,12 @@ export function applyComboTargetExhaustion(
   // rate-limited sibling account, which is the intended, safer outcome.
   if (isAgentrouterConnectionQuotaScope(provider, opts.fallbackResult)) {
     markAgentrouterConnectionQuotaExhaustion(effectiveTarget, { sets, log, tag });
+    return { ...derived, providerExhausted: true, durableExhaustion: durableMark };
+  }
+
+  if (opts.fallbackResult.compatibleAccountQuota) {
+    if (!effectiveTarget.connectionId) return { ...derived, providerExhausted: false };
+    sets.exhaustedConnections.add(`${provider}:${effectiveTarget.connectionId}`);
     return { ...derived, providerExhausted: true, durableExhaustion: durableMark };
   }
 

@@ -7,10 +7,13 @@ import path from "node:path";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-auth-terminal-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
+// Load after DATA_DIR is set so module initialization uses isolated storage.
 const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const auth = await import("../../src/sse/services/auth.ts");
 const accountFallback = await import("../../open-sse/services/accountFallback.ts");
+const { shouldSkipConnDisable } = await import("../../open-sse/services/combo/comboPredicates.ts");
+const { isQuotaExhaustionResponse } = await import("../../open-sse/services/combo/quotaExhaustion.ts");
 
 async function resetStorage() {
   core.resetDbInstance();
@@ -294,3 +297,31 @@ test("markAccountUnavailable keeps oauth-invalid 401 errors non-terminal", async
   assert.equal(after.lastErrorType, "oauth_invalid_token");
   assert.ok(!after.rateLimitedUntil);
 });
+
+for (const provider of ["openai-compatible-test", "anthropic-compatible-test"]) {
+  test(`${provider}: billing failures park only the selected connection`, async () => {
+    await resetStorage();
+    const reset = new Date(Date.now() + 86400000).toISOString().slice(0, 16);
+    const fixtures = [
+      [400, "Your credit balance is too low to access the Anthropic API.", "credits_exhausted"],
+      [400, `You have reached your specified API usage limits. You will regain access on ${reset.replace("T", " at ")} UTC.`, "unavailable"],
+      [403, "The free quota has been exhausted. To continue, please complete your payment information.", "credits_exhausted"],
+    ] as const;
+    for (const [status, message, expected] of fixtures) {
+      const conn = await providersDb.createProviderConnection({ provider, authType: "apikey", isActive: true, testStatus: "active" });
+      const text = `[${status}]: ${message}`;
+      const error = { status, rawMessage: text, errorType: "invalid_request_error" };
+      assert.equal(shouldSkipConnDisable(error, false, false, provider), false);
+      assert.equal(await isQuotaExhaustionResponse(Response.json({ error: { message: text } }, { status }), provider, "model-a"), true);
+      await auth.markAccountUnavailable(conn.id, status, text, provider, "model-a");
+      const after = await providersDb.getProviderConnectionById(conn.id);
+      assert.equal(after.testStatus, expected);
+      if (expected === "unavailable") {
+        assert.ok(Math.abs(Date.parse(after.rateLimitedUntil) - Date.parse(`${reset}:00Z`)) < 2000);
+      }
+    }
+    const validation = "Unknown parameter: 'your credit balance is too low to access the Anthropic API'";
+    assert.equal(shouldSkipConnDisable({ status: 400, rawMessage: validation, errorType: "invalid_request_error" }, false, false, provider), true);
+    assert.equal(await isQuotaExhaustionResponse(new Response("Access denied", { status: 403 }), provider, "model-a"), false);
+  });
+}

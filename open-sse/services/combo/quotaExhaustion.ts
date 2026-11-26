@@ -1,4 +1,5 @@
 import { checkFallbackError, type ProviderProfile } from "../accountFallback.ts";
+import { classifyCompatibleAccountQuota } from "../accountFallback/compatibleAccountQuota.ts";
 import { classifyGeminiQuotaMetricFromText } from "../geminiRateLimitTracker.ts";
 import { readAttemptFailure, type AttemptFailure } from "./attemptFailure.ts";
 
@@ -36,7 +37,7 @@ export async function isQuotaExhaustionResponse(
   const trusted = trustedClassifications.get(response);
   if (trusted !== undefined) return trusted;
 
-  if (!isQuotaStatus(response.status)) return false;
+  if (response.status !== 400 && !isQuotaStatus(response.status)) return false;
   return isQuotaExhaustionFailure(await readAttemptFailure(response), provider, model, profile);
 }
 
@@ -86,6 +87,7 @@ export function isQuotaExhaustionFailure(
   const { response, quota } = failure;
   const trusted = trustedClassifications.get(response);
   if (trusted !== undefined) return trusted;
+  if (classifyCompatibleAccountQuota(response.status, provider, quota.text)) return true;
   if (!isQuotaStatus(response.status)) return false;
   const { text, structuredError } = quota;
   const gemini = geminiQuotaVerdict(provider, response.status, text);
